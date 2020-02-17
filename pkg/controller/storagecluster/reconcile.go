@@ -85,6 +85,10 @@ func (r *ReconcileStorageCluster) Reconcile(request reconcile.Request) (reconcil
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
+	// if .Spec.ExternalStorage.Enabled is true redirect to external Storage Cluster reconciler
+	if instance.Spec.ExternalStorage.Enable {
+		return r.ReconcileExternalStorageCluster(instance)
+	}
 
 	if instance.Spec.Version == "" {
 		instance.Spec.Version = version.Version
@@ -954,6 +958,7 @@ func (r *ReconcileStorageCluster) isActiveStorageCluster(instance *ocsv1.Storage
 	// There are many StorageClusters. Check if this is Active
 	for n, storageCluster := range storageClusterList.Items {
 		if storageCluster.Status.Phase != statusutil.PhaseIgnored &&
+			!storageCluster.Spec.ExternalStorage.Enable &&
 			storageCluster.ObjectMeta.Name != instance.ObjectMeta.Name {
 			// Both StorageClusters are in creation phase
 			// Tiebreak using CreationTimestamp and Alphanumeric ordering
