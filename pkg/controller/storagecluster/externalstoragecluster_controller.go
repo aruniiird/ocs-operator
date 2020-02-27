@@ -2,11 +2,16 @@ package storagecluster
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
+	"github.com/go-logr/logr"
+	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
 	statusutil "github.com/openshift/ocs-operator/pkg/controller/util"
+	"github.com/operator-framework/operator-sdk/pkg/ready"
 	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,6 +35,46 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 			reqLogger.Error(err, "Failed to add conditions to status")
 			return reconcile.Result{}, err
 		}
+	}
+
+	// Check GetDeletionTimestamp to determine if the object is under deletion
+	if sc.GetDeletionTimestamp().IsZero() {
+		if !contains(sc.GetFinalizers(), storageClusterFinalizer) {
+			reqLogger.Info("Finalizer not found for storagecluster. Adding finalizer")
+			sc.ObjectMeta.Finalizers = append(sc.ObjectMeta.Finalizers, storageClusterFinalizer)
+			if err := r.client.Update(context.TODO(), sc); err != nil {
+				reqLogger.Error(err, "Failed to update storagecluster with finalizer")
+				return reconcile.Result{}, err
+			}
+		}
+	} else {
+		// The object is marked for deletion
+		sc.Status.Phase = statusutil.PhaseDeleting
+		phaseErr := r.client.Status().Update(context.TODO(), sc)
+		if phaseErr != nil {
+			reqLogger.Error(phaseErr, "Failed to set PhaseDeleting")
+		}
+		if contains(sc.GetFinalizers(), storageClusterFinalizer) {
+			isDeleted, err := r.deleteResources(sc, reqLogger)
+			if err != nil {
+				// If the dependencies failed to delete because of errors, retry again
+				return reconcile.Result{}, err
+			}
+			if isDeleted {
+				reqLogger.Info("Removing finalizer")
+				// Once all finalizers have been removed, the object will be deleted
+				sc.ObjectMeta.Finalizers = remove(sc.ObjectMeta.Finalizers, storageClusterFinalizer)
+				if err := r.client.Update(context.TODO(), sc); err != nil {
+					reqLogger.Error(err, "Failed to remove finalizer from storagecluster")
+					return reconcile.Result{}, err
+				}
+			} else {
+				// Watch resources and events and reconcile.
+				return reconcile.Result{}, nil
+			}
+		}
+		reqLogger.Info("Object is terminated, skipping reconciliation")
+		return reconcile.Result{}, nil
 	}
 
 	externalCephCluster := newExternalCephCluster(sc, r.cephImage)
@@ -63,6 +108,107 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 			return reconcile.Result{}, err
 		}
 	}
+
+	// in-memory conditions should start off empty. It will only ever hold
+	// negative conditions (!Available, Degraded, Progressing)
+	r.conditions = nil
+	// Start with empty r.phase
+	r.phase = ""
+
+	for _, f := range []func(*ocsv1.StorageCluster, logr.Logger) error{
+		// Add support for additional resources here
+		r.ensureStorageClasses,
+		r.ensureCephCluster,
+		r.ensureNoobaaSystem,
+	} {
+		err = f(sc, reqLogger)
+		if r.phase == statusutil.PhaseClusterExpanding {
+			sc.Status.Phase = statusutil.PhaseClusterExpanding
+			phaseErr := r.client.Status().Update(context.TODO(), sc)
+			if phaseErr != nil {
+				reqLogger.Error(phaseErr, "Failed to set PhaseClusterExpanding")
+			}
+		} else {
+			if sc.Status.Phase != statusutil.PhaseReady {
+				sc.Status.Phase = statusutil.PhaseProgressing
+				phaseErr := r.client.Status().Update(context.TODO(), sc)
+				if phaseErr != nil {
+					reqLogger.Error(phaseErr, "Failed to set PhaseProgressing")
+				}
+			}
+		}
+		if err != nil {
+			reason := ocsv1.ReconcileFailed
+			message := fmt.Sprintf("Error while reconciling: %v", err)
+			statusutil.SetErrorCondition(&sc.Status.Conditions, reason, message)
+			sc.Status.Phase = statusutil.PhaseError
+			// don't want to overwrite the actual reconcile failure
+			uErr := r.client.Status().Update(context.TODO(), sc)
+			if uErr != nil {
+				reqLogger.Error(uErr, "Failed to update status")
+			}
+			return reconcile.Result{}, err
+		}
+	}
+
+	// All component operators are in a happy state.
+	if r.conditions == nil {
+		reqLogger.Info("No component operator reported negatively")
+		reason := ocsv1.ExternalClusterConnected
+		message := ocsv1.ExternalClusterConnectedMessage
+		statusutil.SetCompleteCondition(&sc.Status.Conditions, reason, message)
+		conditionsv1.SetStatusCondition(&sc.Status.Conditions, conditionsv1.Condition{
+			Type:    ocsv1.ConditionExternalClusterConnected,
+			Status:  corev1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		})
+
+		// If no operator whose conditions we are watching reports an error, then it is safe
+		// to set readiness.
+		r := ready.NewFileReady()
+		err = r.Set()
+		if err != nil {
+			reqLogger.Error(err, "Failed to mark operator ready")
+			return reconcile.Result{}, err
+		}
+	} else {
+		// If any component operator reports negatively we want to write that to
+		// the instance while preserving it's lastTransitionTime.
+		// For example, consider the resource has the Available condition
+		// type with type "False". When reconciling the resource we would
+		// add it to the in-memory representation of OCS's conditions (r.conditions)
+		// and here we are simply writing it back to the server.
+		// One shortcoming is that only one failure of a particular condition can be
+		// captured at one time (ie. if resource1 and resource2 are both reporting !Available,
+		// you will only see resource2q as it updates last).
+		for _, condition := range r.conditions {
+			conditionsv1.SetStatusCondition(&sc.Status.Conditions, condition)
+		}
+		reason := ocsv1.ReconcileCompleted
+		message := ocsv1.ReconcileCompletedMessage
+		conditionsv1.SetStatusCondition(&sc.Status.Conditions, conditionsv1.Condition{
+			Type:    ocsv1.ConditionReconcileComplete,
+			Status:  corev1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		})
+
+		// If for any reason we marked ourselves !upgradeable...then unset readiness
+		if conditionsv1.IsStatusConditionFalse(sc.Status.Conditions, conditionsv1.ConditionUpgradeable) {
+			r := ready.NewFileReady()
+			err = r.Unset()
+			if err != nil {
+				reqLogger.Error(err, "Failed to mark operator unready")
+				return reconcile.Result{}, err
+			}
+		}
+	}
+	if phaseErr := r.client.Status().Update(context.TODO(), sc); phaseErr != nil {
+		reqLogger.Error(phaseErr, "Failed to update status")
+		return reconcile.Result{}, phaseErr
+	}
+
 	return reconcile.Result{}, nil
 }
 
