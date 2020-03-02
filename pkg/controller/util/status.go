@@ -111,6 +111,46 @@ func SetCompleteCondition(conditions *[]conditionsv1.Condition, reason string, m
 	})
 }
 
+// MapExternalCephClusterNegativeConditions maps the status states from CephCluster resource into ocs status conditions.
+// This will only look for negative conditions: !Available, Degraded, Progressing
+func MapExternalCephClusterNegativeConditions(conditions *[]conditionsv1.Condition, found *cephv1.CephCluster) {
+	switch found.Status.State {
+	case cephv1.ClusterStateConnecting:
+		conditionsv1.SetStatusCondition(conditions, conditionsv1.Condition{
+			Type:    ocsv1.ConditionExternalClusterConnecting,
+			Status:  corev1.ConditionTrue,
+			Reason:  "ExternalClusterStateConnecting",
+			Message: fmt.Sprintf("ExternalCephCluster is trying to connect: %v", found.Status.Message),
+		})
+		conditionsv1.SetStatusCondition(conditions, conditionsv1.Condition{
+			Type:    ocsv1.ConditionExternalClusterConnected,
+			Status:  corev1.ConditionFalse,
+			Reason:  "ExternalClusterStateConnecting",
+			Message: fmt.Sprintf("ExternalCephCluster is trying to connect: %v", found.Status.Message),
+		})
+	case cephv1.ClusterStateError:
+		conditionsv1.SetStatusCondition(conditions, conditionsv1.Condition{
+			Type:    ocsv1.ConditionExternalClusterConnected,
+			Status:  corev1.ConditionFalse,
+			Reason:  "ExternalClusterStateError",
+			Message: fmt.Sprintf("External CephCluster error: %v", string(found.Status.Message)),
+		})
+		conditionsv1.SetStatusCondition(conditions, conditionsv1.Condition{
+			Type:    ocsv1.ConditionExternalClusterConnecting,
+			Status:  corev1.ConditionFalse,
+			Reason:  "ExternalClusterStateError",
+			Message: fmt.Sprintf("External CephCluster error: %v", string(found.Status.Message)),
+		})
+	default:
+		conditionsv1.SetStatusCondition(conditions, conditionsv1.Condition{
+			Type:    conditionsv1.ConditionDegraded,
+			Status:  corev1.ConditionTrue,
+			Reason:  "ExternalClusterStateUnknownCondition",
+			Message: fmt.Sprintf("External CephCluster Unknown Condition: %v", string(found.Status.Message)),
+		})
+	}
+}
+
 // MapCephClusterNegativeConditions maps the status states from CephCluster resource into ocs status conditions.
 // This will only look for negative conditions: !Available, Degraded, Progressing
 func MapCephClusterNegativeConditions(conditions *[]conditionsv1.Condition, found *cephv1.CephCluster) {

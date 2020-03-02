@@ -133,6 +133,10 @@ const (
 	// ConditionExternalClusterConnected condition type indicates
 	// the successful connection to an external cluster
 	ConditionExternalClusterConnected conditionsv1.ConditionType = "ExternalClusterConnected"
+
+	// ConditionExternalClusterConnecting type indicates that rook is still trying for
+	// an external connection
+	ConditionExternalClusterConnecting conditionsv1.ConditionType = "ExternalClusterConnecting"
 )
 
 // List of constants to show different different reconciliation messages and statuses.

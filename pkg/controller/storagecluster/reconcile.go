@@ -112,7 +112,7 @@ func (r *ReconcileStorageCluster) Reconcile(request reconcile.Request) (reconcil
 		instance.Spec.Version = version.Version
 	}
 
-	// if .Spec.ExternalStorage.Enabled is true redirect to external Storage Cluster reconciler
+	// if .Spec.ExternalStorage.Enable is true redirect to external Storage Cluster reconciler
 	if instance.Spec.ExternalStorage.Enable {
 		return r.ReconcileExternalStorageCluster(instance)
 	}

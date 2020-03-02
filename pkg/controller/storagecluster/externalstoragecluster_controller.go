@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
+	objectreferencesv1 "github.com/openshift/custom-resource-status/objectreferences/v1"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
 	statusutil "github.com/openshift/ocs-operator/pkg/controller/util"
 	"github.com/operator-framework/operator-sdk/pkg/ready"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/reference"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -77,38 +79,6 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 		return reconcile.Result{}, nil
 	}
 
-	externalCephCluster := newExternalCephCluster(sc, r.cephImage)
-	// Set StorageCluster instance as the owner and controller
-	if err := controllerutil.SetControllerReference(sc, externalCephCluster, r.scheme); err != nil {
-		return reconcile.Result{}, err
-	}
-	// Check if this CephCluster already exists
-	found := &cephv1.CephCluster{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: externalCephCluster.Name, Namespace: externalCephCluster.Namespace}, found)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			reqLogger.Info("Creating External CephCluster")
-			if err := r.client.Create(context.TODO(), externalCephCluster); err != nil {
-				return reconcile.Result{}, err
-			}
-		}
-		return reconcile.Result{}, err
-	}
-	// Update the CephCluster if it is not in the desired state
-	if !reflect.DeepEqual(externalCephCluster.Spec, found.Spec) {
-		reqLogger.Info("Updating spec for External CephCluster")
-		sc.Status.Phase = string(found.Status.State)
-		err = r.client.Status().Update(context.TODO(), sc)
-		if err != nil {
-			reqLogger.Error(err, "Failed to add conditions to status")
-			return reconcile.Result{}, err
-		}
-		found.Spec = externalCephCluster.Spec
-		if err := r.client.Update(context.TODO(), found); err != nil {
-			return reconcile.Result{}, err
-		}
-	}
-
 	// in-memory conditions should start off empty. It will only ever hold
 	// negative conditions (!Available, Degraded, Progressing)
 	r.conditions = nil
@@ -118,8 +88,8 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 	for _, f := range []func(*ocsv1.StorageCluster, logr.Logger) error{
 		// Add support for additional resources here
 		r.ensureStorageClasses,
-		r.ensureCephCluster,
-		r.ensureNoobaaSystem,
+		r.ensureExternalCephCluster,
+		// r.ensureNoobaaSystem,
 	} {
 		err = f(sc, reqLogger)
 		if r.phase == statusutil.PhaseClusterExpanding {
@@ -154,15 +124,9 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 	// All component operators are in a happy state.
 	if r.conditions == nil {
 		reqLogger.Info("No component operator reported negatively")
-		reason := ocsv1.ExternalClusterConnected
-		message := ocsv1.ExternalClusterConnectedMessage
+		reason := ocsv1.ReconcileCompleted
+		message := ocsv1.ReconcileCompletedMessage
 		statusutil.SetCompleteCondition(&sc.Status.Conditions, reason, message)
-		conditionsv1.SetStatusCondition(&sc.Status.Conditions, conditionsv1.Condition{
-			Type:    ocsv1.ConditionExternalClusterConnected,
-			Status:  corev1.ConditionTrue,
-			Reason:  reason,
-			Message: message,
-		})
 
 		// If no operator whose conditions we are watching reports an error, then it is safe
 		// to set readiness.
@@ -227,10 +191,70 @@ func newExternalCephCluster(sc *ocsv1.StorageCluster, cephImage string) *cephv1.
 				Enable: true,
 			},
 			DataDirHostPath: "/var/lib/rook",
-			CephVersion: cephv1.CephVersionSpec{
-				Image: cephImage,
-			},
 		},
 	}
 	return externalCephCluster
+}
+
+func (r *ReconcileStorageCluster) ensureExternalCephCluster(
+	sc *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+
+	// Define a new CephCluster object
+	cephCluster := newExternalCephCluster(sc, r.cephImage)
+
+	// Set StorageCluster instance as the owner and controller
+	if err := controllerutil.SetControllerReference(sc, cephCluster, r.scheme); err != nil {
+		return err
+	}
+
+	// Check if this CephCluster already exists
+	found := &cephv1.CephCluster{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: cephCluster.Name, Namespace: cephCluster.Namespace}, found)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			reqLogger.Info("Creating External CephCluster")
+			return r.client.Create(context.TODO(), cephCluster)
+		}
+		return err
+	}
+
+	// Update the CephCluster if it is not in the desired state
+	if !reflect.DeepEqual(cephCluster.Spec, found.Spec) {
+		reqLogger.Info("Updating spec for External CephCluster")
+		sc.Status.Phase = string(found.Status.State)
+		if err := r.client.Status().Update(context.TODO(), sc); err != nil {
+			reqLogger.Error(err, "Failed to add conditions to status")
+			return err
+		}
+		found.Spec = cephCluster.Spec
+		return r.client.Update(context.TODO(), found)
+	}
+
+	// Add it to the list of RelatedObjects if found
+	objectRef, err := reference.GetReference(r.scheme, found)
+	if err != nil {
+		return err
+	}
+	objectreferencesv1.SetObjectReference(&sc.Status.RelatedObjects, *objectRef)
+
+	// Handle CephCluster resource status
+	if found.Status.State == "" {
+		reqLogger.Info("CephCluster resource is not reporting status.")
+		// What does this mean to OCS status? Assuming progress.
+		reason := "CephClusterStatus"
+		message := "CephCluster resource is not reporting status"
+		statusutil.MapCephClusterNoConditions(&r.conditions, reason, message)
+	} else {
+		// Interpret CephCluster status and set any negative conditions
+		statusutil.MapExternalCephClusterNegativeConditions(&r.conditions, found)
+	}
+
+	// When phase is expanding, wait for CephCluster state to be updating
+	// this means expansion is in progress and overall system is progressing
+	// else expansion is not yet triggered
+	if sc.Status.Phase == statusutil.PhaseClusterExpanding &&
+		found.Status.State != cephv1.ClusterStateUpdating {
+		r.phase = statusutil.PhaseClusterExpanding
+	}
+	return nil
 }
