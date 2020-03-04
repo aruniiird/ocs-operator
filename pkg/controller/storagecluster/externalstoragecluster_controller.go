@@ -87,9 +87,9 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 
 	for _, f := range []func(*ocsv1.StorageCluster, logr.Logger) error{
 		// Add support for additional resources here
-		r.ensureStorageClasses,
+		r.ensureCephConfig,
 		r.ensureExternalCephCluster,
-		// r.ensureNoobaaSystem,
+		r.ensureNoobaaSystem,
 	} {
 		err = f(sc, reqLogger)
 		if r.phase == statusutil.PhaseClusterExpanding {
@@ -191,6 +191,9 @@ func newExternalCephCluster(sc *ocsv1.StorageCluster, cephImage string) *cephv1.
 				Enable: true,
 			},
 			DataDirHostPath: "/var/lib/rook",
+			CephVersion: cephv1.CephVersionSpec{
+				Image: cephImage,
+			},
 		},
 	}
 	return externalCephCluster
@@ -212,7 +215,7 @@ func (r *ReconcileStorageCluster) ensureExternalCephCluster(
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: cephCluster.Name, Namespace: cephCluster.Namespace}, found)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			reqLogger.Info("Creating External CephCluster")
+			reqLogger.Info("Creating External CephCluster: v", r.cephImage)
 			return r.client.Create(context.TODO(), cephCluster)
 		}
 		return err
