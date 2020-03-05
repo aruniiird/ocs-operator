@@ -27,6 +27,10 @@ var (
 	PhaseClusterExpanding = "Expanding Capacity"
 	// PhaseDeleting is used when cluster is deleting
 	PhaseDeleting = "Deleting"
+	// PhaseConnecting is used when cluster is connecting to external cluster
+	PhaseConnecting = "Connecting"
+	//PhaseConnected is used when cluster has connected to external cluster
+	PhaseConnected = "Connected"
 )
 
 // SetProgressingCondition sets the ProgressingCondition to True and other conditions to
