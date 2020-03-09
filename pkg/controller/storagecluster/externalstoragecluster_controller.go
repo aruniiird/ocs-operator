@@ -119,7 +119,6 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 
 	for _, f := range []func(*ocsv1.StorageCluster, logr.Logger) error{
 		// Add support for additional resources here
-		// r.ensureStorageClasses,
 		r.ensureCephConfig,
 		r.ensureExternalCephCluster,
 		r.ensureNoobaaSystem,
@@ -201,6 +200,15 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 			if err != nil {
 				reqLogger.Error(err, "Failed to mark operator unready")
 				return reconcile.Result{}, err
+			}
+		}
+		if sc.Status.Phase != statusutil.PhaseClusterExpanding {
+			if conditionsv1.IsStatusConditionTrue(sc.Status.Conditions, conditionsv1.ConditionProgressing) {
+				sc.Status.Phase = statusutil.PhaseProgressing
+			} else if conditionsv1.IsStatusConditionFalse(sc.Status.Conditions, conditionsv1.ConditionUpgradeable) {
+				sc.Status.Phase = statusutil.PhaseNotReady
+			} else {
+				sc.Status.Phase = statusutil.PhaseError
 			}
 		}
 	}
@@ -291,10 +299,10 @@ func (r *ReconcileStorageCluster) ensureExternalCephCluster(
 
 	if found.Status.State == cephv1.ClusterStateConnecting {
 		sc.Status.Phase = statusutil.PhaseConnecting
-	}
-
-	if found.Status.State == cephv1.ClusterStateConnected {
+	} else if found.Status.State == cephv1.ClusterStateConnected {
 		sc.Status.Phase = statusutil.PhaseConnected
+	} else {
+		sc.Status.Phase = statusutil.PhaseNotReady
 	}
 
 	return nil
