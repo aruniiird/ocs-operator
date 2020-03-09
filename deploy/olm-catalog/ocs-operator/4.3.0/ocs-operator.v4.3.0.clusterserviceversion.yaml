@@ -1161,11 +1161,7 @@ spec:
                         value: noobaa/noobaa-core:5.2.11
                       - name: NOOBAA_DB_IMAGE
                         value: centos/mongodb-36-centos7
-<<<<<<< HEAD
                     image: quay.io/vbnrh/ocs-operator:phase_v2
-=======
-                    image: quay.io/ocs-dev/ocs-operator:latest
->>>>>>> adds annotation to CSV indicating support for externalStorage
                     imagePullPolicy: Always
                     name: ocs-operator
                     ports:

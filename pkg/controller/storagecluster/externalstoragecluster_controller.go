@@ -119,6 +119,7 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 
 	for _, f := range []func(*ocsv1.StorageCluster, logr.Logger) error{
 		// Add support for additional resources here
+		// r.ensureStorageClasses,
 		r.ensureCephConfig,
 		r.ensureExternalCephCluster,
 		r.ensureNoobaaSystem,
@@ -202,7 +203,6 @@ func (r *ReconcileStorageCluster) ReconcileExternalStorageCluster(sc *ocsv1.Stor
 				return reconcile.Result{}, err
 			}
 		}
-
 	}
 	if phaseErr := r.client.Status().Update(context.TODO(), sc); phaseErr != nil {
 		reqLogger.Error(phaseErr, "Failed to update status")
@@ -288,7 +288,6 @@ func (r *ReconcileStorageCluster) ensureExternalCephCluster(
 		// here negative conditions for external cluster has tobe set
 		statusutil.MapExternalCephClusterNegativeConditions(&r.conditions, found)
 	}
-
 
 	if found.Status.State == cephv1.ClusterStateConnecting {
 		sc.Status.Phase = statusutil.PhaseConnecting
