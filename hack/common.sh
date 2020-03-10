@@ -30,7 +30,9 @@ REDHAT_OCS_CI_FORCE_TOOL_POD_INSTALL="${REDHAT_OCS_CI_FORCE_TOOL_POD_INSTALL:-fa
 
 # This env var allows developers to point to a custom oc tool that isn't in $PATH
 # defaults to just using the 'oc' binary provided in $PATH
+DEFAULT_OCS_NAMESPACE="openshift-storage"
 OCS_OC_PATH="${OCS_OC_PATH:-oc}"
+OCS_NAMESPACE="${OCS_NAMESPACE:-$DEFAULT_OCS_NAMESPACE}"
 
 NOOBAA_CSV="$OUTDIR_TEMPLATES/noobaa-csv.yaml"
 ROOK_CSV="$OUTDIR_TEMPLATES/rook-csv.yaml.in"
