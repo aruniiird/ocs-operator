@@ -26,6 +26,7 @@ func (r *ReconcileStorageCluster) ensureNoobaaSystem(sc *ocsv1.StorageCluster, r
 	if err != nil {
 		if errors.IsNotFound(err) {
 			reqLogger.Info("Waiting on ceph cluster to be created before starting noobaa")
+			reqLogger.Info("CephError: ", err)
 			return nil
 		}
 		return err
