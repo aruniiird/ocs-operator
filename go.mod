@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/RHsyseng/operator-utils v0.0.0-20190807020041-5344a0f594b8
+	github.com/aruniiird/rook v1.3.8
 	github.com/blang/semver v3.5.1+incompatible
 	github.com/coreos/prometheus-operator v0.38.0
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
@@ -19,7 +20,6 @@ require (
 	github.com/openshift/custom-resource-status v0.0.0-20190812200727-7961da9a2eb7
 	github.com/operator-framework/operator-lifecycle-manager v0.0.0-20200321030439-57b580e57e88
 	github.com/operator-framework/operator-sdk v0.17.0
-	github.com/rook/rook v1.3.5-0.20200601192858-4e04d639724f
 	github.com/stretchr/testify v1.4.0
 	go.uber.org/zap v1.14.1
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
