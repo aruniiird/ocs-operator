@@ -2490,6 +2490,8 @@ spec:
                     type: string
                 type: object
               type: array
+            snapshotClassesCreated:
+              type: boolean
             storageClassesCreated:
               type: boolean
           type: object
