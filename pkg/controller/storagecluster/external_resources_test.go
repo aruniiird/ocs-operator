@@ -209,16 +209,6 @@ func assertExpectedExternalResources(t *testing.T, reconciler ReconcileStorageCl
 	}
 }
 
-// findNamedResourceFromArray retrieves the 'ExternalResource' with provided 'name'
-func findNamedResourceFromArray(extArr []ExternalResource, name string) (ExternalResource, error) {
-	for _, extR := range extArr {
-		if extR.Name == name {
-			return extR, nil
-		}
-	}
-	return ExternalResource{}, fmt.Errorf("Unable to retrieve %q external resource", name)
-}
-
 // removeNamedResourceFromArray removes the first resource with 'Name' == 'name'
 func removeNamedResourceFromArray(extArr []ExternalResource, name string) []ExternalResource {
 	extArrLen := len(extArr)

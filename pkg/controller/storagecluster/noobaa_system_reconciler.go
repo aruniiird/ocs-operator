@@ -3,6 +3,7 @@ package storagecluster
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/noobaa/noobaa-operator/v2/pkg/apis/noobaa/v1alpha1"
@@ -83,6 +84,16 @@ func (r *ReconcileStorageCluster) ensureNoobaaSystem(sc *ocsv1.StorageCluster, r
 	return nil
 }
 
+// findNamedResourceFromArray retrieves the 'ExternalResource' with provided 'name'
+func findNamedResourceFromArray(extArr []ExternalResource, name string) (ExternalResource, error) {
+	for _, extR := range extArr {
+		if extR.Name == name {
+			return extR, nil
+		}
+	}
+	return ExternalResource{}, fmt.Errorf("Unable to retrieve %q external resource", name)
+}
+
 func (r *ReconcileStorageCluster) setNooBaaDesiredState(nb *nbv1.NooBaa, sc *ocsv1.StorageCluster) error {
 	storageClassName := generateNameForCephBlockPoolSC(sc)
 	coreResources := defaults.GetDaemonResources("noobaa-core", sc.Spec.Resources)
@@ -96,6 +107,15 @@ func (r *ReconcileStorageCluster) setNooBaaDesiredState(nb *nbv1.NooBaa, sc *ocs
 	// If independent mode, we pass the endpoint value as a label to Noobaa
 	// so it can connect to the RGW S3 endpoint
 	if sc.Spec.ExternalStorage.Enable {
+		extRs, err := r.retrieveExternalSecretData(sc, r.reqLogger)
+		if err != nil {
+			return err
+		}
+		extR, err := findNamedResourceFromArray(extRs, cephRgwStorageClassName)
+		if err != nil {
+			return err
+		}
+		externalRgwEndpoint = strings.Replace(extR.Data[externalCephRgwEndpointKey], ":", "_", -1)
 		nb.Labels[externalRgwEndpointLabelName] = externalRgwEndpoint
 	}
 	nb.Spec.DBStorageClass = &storageClassName
