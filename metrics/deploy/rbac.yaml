@@ -21,11 +21,20 @@ rules:
   - list
   - watch
 - apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups:
   - ceph.rook.io
   resources:
   - cephobjectstores
   - cephclusters
   - cephblockpools
+  - cephrbdmirrors
   verbs:
     - get
     - list
